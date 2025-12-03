@@ -1,0 +1,320 @@
+BASH
+scp C:/Users/aldri/Downloads/archive/used_cars_data.csv \
+    avilla164@129.153.113.98:~/used_cars_data.csv
+	
+BASH
+
+ssh avilla164@129.153.113.98
+
+ls -lh ~/used_cars_data.csv
+
+hdfs dfs -mkdir -p /user/avilla164/used_cars/full
+
+hdfs dfs -put ~/used_cars_data.csv /user/avilla164/used_cars/full/
+
+hdfs dfs -ls -h /user/avilla164/used_cars/full
+-------------------------------------------------------
+BEEHIVE
+USE avilla164;
+CREATE EXTERNAL TABLE used_cars_full_raw (
+  vin                     STRING,
+  back_legroom            STRING,
+  bed_length              STRING,
+  bed_height              STRING,
+  bed_length2             STRING,  -- second "bed_length"
+  body_type               STRING,
+  cabin                   STRING,
+  city                    STRING,
+  city_fuel_economy       STRING,
+  combine_fuel_economy    STRING,
+  daysonmarket            STRING,
+  dealer_zip              STRING,
+  description             STRING,
+  engine_cylinders        STRING,
+  engine_displacement     STRING,
+  engine_type             STRING,
+  exterior_color          STRING,
+  fleet                   STRING,
+  frame_damaged           STRING,
+  franchise_dealer        STRING,
+  franchise_make          STRING,
+  front_legroom           STRING,
+  fuel_tank_volume        STRING,
+  fuel_type               STRING,
+  has_accidents           STRING,
+  height                  STRING,
+  highway_fuel_economy    STRING,
+  horsepower              STRING,
+  interior_color          STRING,
+  isCab                   STRING,
+  is_certified            STRING,
+  is_cpo                  STRING,
+  is_new                  STRING,
+  iso_emcpo               STRING,
+  latitude                STRING,
+  length                  STRING,
+  listed_date             STRING,
+  listing_color           STRING,
+  listing_id              STRING,
+  longitude               STRING,
+  main_picture_url        STRING,
+  major_options           STRING,
+  make_name               STRING,
+  maximum_seating         STRING,
+  mileage                 STRING,
+  model_name              STRING,
+  owner_count             STRING,
+  power                   STRING,
+  price                   STRING,
+  salvage                 STRING,
+  savings_amount          STRING,
+  seller_rating           STRING,
+  sp_id                   STRING,
+  sp_name                 STRING,
+  theft_title             STRING,
+  torque                  STRING,
+  transmission            STRING,
+  transmission_display    STRING,
+  trimId                  STRING,
+  trim_name               STRING,
+  vehicle_damage_category STRING,
+  wheel_system            STRING,
+  wheel_system_display    STRING,
+  wheelbase               STRING,
+  width                   STRING,
+  year                    STRING
+)
+ROW FORMAT SERDE 'org.apache.hadoop.hive.serde2.OpenCSVSerde'
+WITH SERDEPROPERTIES (
+  "separatorChar" = ",",
+  "quoteChar"     = "\"",
+  "escapeChar"    = "\\"
+)
+STORED AS TEXTFILE
+LOCATION '/user/avilla164/used_cars/full'
+TBLPROPERTIES ('skip.header.line.count'='1');
+----------------------------------------------------------------
+SELECT
+  vin,
+  listed_date,
+  make_name,
+  model_name,
+  year,
+  price,
+  mileage,
+  city,
+  latitude,
+  longitude
+FROM used_cars_full_raw
+LIMIT 10;
+
+----------------------------------------------------------------
+
+CREATE TABLE used_cars_master AS
+SELECT
+    vin,
+    make,
+    model,
+    year,
+    price,
+    mileage,
+    city,
+    state,
+    latitude,
+    longitude,
+    fuel_type,
+    body_type,
+    listed_date,
+    CAST(SPLIT(listed_date, '-')[0] AS INT) AS listed_year,
+    CAST(SPLIT(listed_date, '-')[1] AS INT) AS listed_month
+FROM used_cars_full_raw
+WHERE price > 0
+  AND latitude IS NOT NULL
+  AND longitude IS NOT NULL;
+
+-------------------------------------------------------------
+SELECT COUNT(*) FROM used_cars_master;
+
+SELECT vin, make, model, year, price, mileage, city, listed_year, listed_month
+FROM used_cars_master
+LIMIT 10;
+
+------------------------------------------------------------------
+--TOP 5 MODELS SOLD
+SELECT
+    model,
+    COUNT(*) AS listing_count
+FROM used_cars_master
+WHERE model IS NOT NULL
+GROUP BY model
+ORDER BY listing_count DESC
+LIMIT 5;
+----------------------------------------------------------------
+--TOP 5 MOST SOLD MAKES
+SELECT
+    make,
+    COUNT(*) AS listing_count
+FROM used_cars_master
+WHERE make IS NOT NULL
+GROUP BY make
+ORDER BY listing_count DESC
+LIMIT 5;
+--------------------------------------------------------------
+--TOP 5 MOST SOLD MAKE + MODEL PAIRS (MOST COMMON EXACT VEHICLES)
+SELECT
+    make,
+    model,
+    COUNT(*) AS listing_count
+FROM used_cars_master
+WHERE make IS NOT NULL
+  AND model IS NOT NULL
+GROUP BY make, model
+ORDER BY listing_count DESC
+LIMIT 5;
+---------------------------------------------------------------
+--AVERAGE PRICE FOR MOST SOLD MODELS
+SELECT
+    make,
+    model,
+    COUNT(*) AS listing_count,
+    AVG(price) AS avg_price
+FROM used_cars_master
+WHERE make IS NOT NULL
+  AND model IS NOT NULL
+  AND price > 0
+GROUP BY make, model
+ORDER BY listing_count DESC
+LIMIT 5;
+---------------------------------------------------------------------
+--TOP 5 MOST SOLD FUEL TYPES
+SELECT
+    fuel_type,
+    COUNT(*) AS listing_count
+FROM used_cars_master
+WHERE fuel_type IS NOT NULL
+GROUP BY fuel_type
+ORDER BY listing_count DESC
+LIMIT 5;
+----------------------------------------------------------------------
+--AVG PRICE FOR EACH FUEL TYPES
+SELECT
+    fuel_type,
+    COUNT(*) AS listing_count,
+    AVG(price) AS avg_price
+FROM used_cars_master
+WHERE fuel_type IS NOT NULL
+GROUP BY fuel_type
+ORDER BY listing_count DESC;
+-------------------------------------------------------------------------
+DROP TABLE IF EXISTS city_stats;
+DROP TABLE IF EXISTS city_stats_geo;
+
+CREATE TABLE city_stats_geo AS
+SELECT
+    city,
+    AVG(price)      AS avg_price,
+    COUNT(*)        AS listing_count,
+    AVG(latitude)   AS lat,
+    AVG(longitude)  AS lon
+FROM used_cars_master
+WHERE city IS NOT NULL
+  AND latitude IS NOT NULL
+  AND longitude IS NOT NULL
+GROUP BY city;
+
+---------------------------------------------------------------------
+DROP TABLE IF EXISTS monthly_trend;
+
+CREATE TABLE monthly_trend AS
+SELECT
+  listed_year,
+  listed_month,
+  AVG(price) AS avg_price,
+  COUNT(*)   AS listing_count
+FROM used_cars_master
+GROUP BY listed_year, listed_month
+ORDER BY listed_year, listed_month;
+
+------------------------------------------------------------------
+DROP TABLE IF EXISTS top5_makes;
+DROP TABLE IF EXISTS top5_trend;
+
+CREATE TABLE top5_makes AS
+SELECT
+  make,
+  COUNT(*) AS c
+FROM used_cars_master
+GROUP BY make
+ORDER BY c DESC
+LIMIT 5;
+
+CREATE TABLE top5_trend AS
+SELECT
+  c.make,
+  c.listed_year,
+  c.listed_month,
+  AVG(c.price) AS avg_price,
+  COUNT(*)     AS listing_count
+FROM used_cars_master c
+JOIN top5_makes t
+  ON c.make = t.make
+GROUP BY c.make, c.listed_year, c.listed_month;
+
+SELECT * FROM top5_makes;
+SELECT * FROM top5_trend LIMIT 20;
+
+---------------------------------------------------------------------
+DROP TABLE IF EXISTS fuel_stats;
+
+CREATE TABLE fuel_stats AS
+SELECT
+  fuel_type,
+  AVG(price)   AS avg_price,
+  AVG(mileage) AS avg_mileage,
+  COUNT(*)     AS listing_count
+FROM used_cars_master
+WHERE fuel_type IS NOT NULL
+GROUP BY fuel_type;
+-------------------------------------------------------------------
+INSERT OVERWRITE DIRECTORY '/user/avilla164/out/monthly_trend'
+ROW FORMAT DELIMITED
+FIELDS TERMINATED BY ','
+SELECT * FROM monthly_trend;
+
+INSERT OVERWRITE DIRECTORY '/user/avilla164/out/top5_trend'
+ROW FORMAT DELIMITED
+FIELDS TERMINATED BY ','
+SELECT * FROM top5_trend;
+
+INSERT OVERWRITE DIRECTORY '/user/avilla164/out/city_stats_geo'
+ROW FORMAT DELIMITED
+FIELDS TERMINATED BY ','
+SELECT city, avg_price, listing_count, lat, lon
+FROM city_stats_geo;
+
+INSERT OVERWRITE DIRECTORY '/user/avilla164/out/fuel_stats'
+ROW FORMAT DELIMITED
+FIELDS TERMINATED BY ','
+SELECT * FROM fuel_stats;
+-------------------------------------------------------------------
+BASH
+ssh avilla164@129.153.113.98
+
+hdfs dfs -get /user/avilla164/out/monthly_trend ./monthly_trend
+mv monthly_trend/000000_0 monthly_trend.csv
+
+hdfs dfs -get /user/avilla164/out/top5_trend ./top5_trend
+mv top5_trend/000000_0 top5_trend.csv
+
+hdfs dfs -get /user/avilla164/out/city_stats_geo ./city_stats_geo
+mv city_stats_geo/* city_stats_geo.csv
+
+hdfs dfs -get /user/avilla164/out/fuel_stats ./fuel_stats
+mv fuel_stats/000000_0 fuel_stats.csv
+--------------------------------------------------------------------
+BASH (New Window)
+scp avilla164@129.153.113.98:~/monthly_trend.csv .
+scp avilla164@129.153.113.98:~/top5_trend.csv .
+scp avilla164@129.153.113.98:~/city_stats_geo.csv
+scp avilla164@129.153.113.98:~/fuel_stats.csv .
+-----------------------------------------------------------------
